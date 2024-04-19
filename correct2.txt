@@ -998,8 +998,5 @@ Virtual address: 8940 Physical address: 46572 Value: 0
 Virtual address: 9929 Physical address: 44745 Value: 0
 Virtual address: 45563 Physical address: 46075 Value: 126
 Virtual address: 12107 Physical address: 2635 Value: -46
-Обработанные адреса = 1000
-Ошибки страницы = 244
-Процент ошибок страницы = 0.244
-TLB попадания = 55
-процент TLB попаданий = 0.055
+Частота ошибок страниц = 0.244
+Частота попаданий в TLB  = 0.055

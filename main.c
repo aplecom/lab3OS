@@ -24,13 +24,16 @@ struct page_frame_number {
 int physical_memory [COUNT_FRAMES][FRAME_SIZE];
 struct page_frame_number TLB[TLB_SIZE];
 struct page_frame_number PAGE_TABLE[COUNT_FRAMES];
+
+const int offset_mask = (1<<8)-1; // 255
+
+signed char buf[256];
+signed char value;
+
+int next_available_index = 0;
+int cached = 0; // количесвто закэшированных
 int hit = 0;
 int page_miss = 0;
-const int offset_mask = (1<<8)-1; // 255
-signed char buf[256];
-int next_available_index = 0;
-signed char value;
-int cached = 0; // количесвто закэшированных
 
 int read_store(int page_number) {
     // доступно ли место в таблице страниц
@@ -39,46 +42,42 @@ int read_store(int page_number) {
     }
 
     // считывание данных из backing store в буфер
-
     fseek(backing_store_bin, page_number * PAGE_SIZE, SEEK_SET); // установка позиции в потоке данных, смещение отсчитывается от начала файла со смещением в 256 байт * номер страницы
-    size_t count = 256;
-    fread(buf, sizeof(signed char), count, backing_store_bin); // считываем данные из потока по байту
+    fread(buf, sizeof(signed char), PAGE_SIZE, backing_store_bin); // считываем данные из потока по байту по странице 256 раз ( ее размер )
 
-    // копирование данных из буфера в физическую память
-    for (int i = 0; i < count; i++) {
+    // копирования всех байт из буфера buf в соответствующий фрейм физической памяти.
+    for (int i = 0; i < PAGE_SIZE; i++) {
         physical_memory[next_available_index][i] = buf[i];
     }
 
-    // обновление таблицы страниц
     PAGE_TABLE[next_available_index].page_number = page_number;
     PAGE_TABLE[next_available_index].frame_number = next_available_index;
 
-    // обновление индексво для следующей записи
     int new_frame = next_available_index;
     next_available_index++;
-
 
     return new_frame;
 }
 
-void insert_TLB(int page_num, int frame_num) { // сдвигаем записи вверх удаляя самую старую, для добавления новой
+void insert_TLB_FIFO(int page_number, int frame_number) {
     int i;
+    // сдвигом освобождаем место для новой записи если находим в TLB
     for (i = 0; i < cached; i++) {
-        if (TLB[i].page_number == page_num) {
-            while (i < cached - 1) { // свдигаем записи вверх для освобождения места под новую запись
+        if (TLB[i].page_number == page_number) {
+            while (i < cached - 1) {
                 TLB[i] = TLB[i + 1];
                 i++;
             }
             break;
         }
     }
-
-    if (i == cached) // если не совпално вставляем в конец
+    // Если мы не находим совпадение по номеру страницы
+    if (i == cached)
         for (int j =0; j < i; j++)
             TLB[j] = TLB[j + 1];
 
-    TLB[i].page_number = page_num;
-    TLB[i].frame_number = frame_num;
+    TLB[i].page_number = page_number;
+    TLB[i].frame_number = frame_number;
 
     if (cached < TLB_SIZE -1 )
         cached++;
@@ -126,8 +125,8 @@ void process_virtual_page(struct page current_page)
         page_miss++;
     }
 
-    insert_TLB(page_number,frame_number); // вставляем в tlb
-    value = physical_memory[frame_number][offset]; // поулчаем значение по физ адресу
+    insert_TLB_FIFO(page_number,frame_number);
+    value = physical_memory[frame_number][offset];
 
     fprintf(correct2_txt, "Virtual address: %d Physical address: %d Value: %d\n", logical_address, (frame_number << 8) | offset, value);
 
@@ -154,16 +153,13 @@ int main(int argc, char *argv[]) {
         processed_address++;
     }
 
-    fprintf(correct2_txt, "Обработанные адреса = %d\n", processed_address); // Записываем статистику в файл
-    double miss_stat = page_miss / (double)processed_address;
-    double TLB_stat = hit / (double)processed_address;
+    double Page_error_rate = page_miss / (double)processed_address;
+    double TLB_error_rate = hit / (double)processed_address;
 
-    fprintf(correct2_txt, "Ошибки страницы = %d\n", page_miss);
-    fprintf(correct2_txt, "Процент ошибок страницы = %.3f\n",miss_stat);
-    fprintf(correct2_txt, "TLB попадания = %d\n", hit);
-    fprintf(correct2_txt, "процент TLB попаданий = %.3f\n", TLB_stat);
+    fprintf(correct2_txt, "Частота ошибок страниц = %.3f\n",Page_error_rate);
+    fprintf(correct2_txt, "Частота попаданий в TLB  = %.3f\n", TLB_error_rate);
 
     fclose(address_txt);
     fclose(backing_store_bin);
-    fclose(correct2_txt); // Закрываем файл после использования
+    fclose(correct2_txt);
 }
