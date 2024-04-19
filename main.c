@@ -4,7 +4,7 @@
 #define FRAME_SIZE 256 // размер фрейма 2^8 байт
 #define COUNT_FRAMES 256 // всего 256 фреймов
 #define TLB_SIZE 16 // 16 записей в TLB
-#define CHUNK 256
+#define PAGE_SIZE 256 // размер страницы 2^8 байт
 
 FILE *address_txt;
 FILE *backing_store_bin;
@@ -27,7 +27,7 @@ struct page_frame_number PAGE_TABLE[COUNT_FRAMES];
 int hit = 0;
 int page_miss = 0;
 const int offset_mask = (1<<8)-1; // 255
-signed char buffer[CHUNK];
+signed char buf[256];
 int next_available_index = 0;
 signed char value;
 int cached = 0; // количесвто закэшированных
@@ -39,12 +39,14 @@ int read_store(int page_number) {
     }
 
     // считывание данных из backing store в буфер
-    fseek(backing_store_bin, page_number * CHUNK, SEEK_SET);
-    fread(buffer, sizeof(signed char), CHUNK, backing_store_bin);
+
+    fseek(backing_store_bin, page_number * PAGE_SIZE, SEEK_SET); // установка позиции в потоке данных, смещение отсчитывается от начала файла со смещением в 256 байт * номер страницы
+    size_t count = 256;
+    fread(buf, sizeof(signed char), count, backing_store_bin); // считываем данные из потока по байту
 
     // копирование данных из буфера в физическую память
-    for (int i = 0; i < CHUNK; i++) {
-        physical_memory[next_available_index][i] = buffer[i];
+    for (int i = 0; i < count; i++) {
+        physical_memory[next_available_index][i] = buf[i];
     }
 
     // обновление таблицы страниц
