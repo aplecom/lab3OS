@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include <stdbool.h>
+
 
 #define FRAME_SIZE 256 // размер фрейма 2^8 байт
 #define COUNT_FRAMES 256 // всего 256 фреймов
@@ -21,22 +21,20 @@ struct page_frame_number {
     int frame_number;
 };
 
-int physical_mememory [COUNT_FRAMES][FRAME_SIZE]; // физическая память
+int physical_memory [COUNT_FRAMES][FRAME_SIZE];
 struct page_frame_number TLB[TLB_SIZE];
 struct page_frame_number PAGE_TABLE[COUNT_FRAMES];
 int hit = 0;
 int page_miss = 0;
 const int offset_mask = (1<<8)-1; // 255
 signed char buffer[CHUNK];
-int first_available_frame = 0;
-int first_available_page_table_index = 0;
+int next_available_index = 0;
 signed char value;
-int TLB_caches = 0; // кешированные записи
+int cached = 0; // количесвто закэшированных
 
-int read_from_store(int page_number) {
-    // проверка, что есть место в таблице страниц
-    if (first_available_frame >= COUNT_FRAMES || first_available_page_table_index >= COUNT_FRAMES) {
-        fprintf(stderr, "Memory error\n");
+int read_store(int page_number) {
+    // доступно ли место в таблице страниц
+    if (next_available_index >= COUNT_FRAMES) {
         return -1;
     }
 
@@ -46,26 +44,26 @@ int read_from_store(int page_number) {
 
     // копирование данных из буфера в физическую память
     for (int i = 0; i < CHUNK; i++) {
-        physical_mememory[first_available_frame][i] = buffer[i];
+        physical_memory[next_available_index][i] = buffer[i];
     }
 
     // обновление таблицы страниц
-    PAGE_TABLE[first_available_page_table_index].page_number = page_number;
-    PAGE_TABLE[first_available_page_table_index].frame_number = first_available_frame;
+    PAGE_TABLE[next_available_index].page_number = page_number;
+    PAGE_TABLE[next_available_index].frame_number = next_available_index;
 
     // обновление индексво для следующей записи
-    int new_frame = first_available_frame;
-    first_available_frame++;
-    first_available_page_table_index++;
+    int new_frame = next_available_index;
+    next_available_index++;
+
 
     return new_frame;
 }
 
 void insert_TLB(int page_num, int frame_num) { // сдвигаем записи вверх удаляя самую старую, для добавления новой
     int i;
-    for (i = 0; i < TLB_caches; i++) {
+    for (i = 0; i < cached; i++) {
         if (TLB[i].page_number == page_num) {
-            while (i < TLB_caches - 1) { // свдигаем записи вверх для освобождения места под новую запись
+            while (i < cached - 1) { // свдигаем записи вверх для освобождения места под новую запись
                 TLB[i] = TLB[i + 1];
                 i++;
             }
@@ -73,15 +71,15 @@ void insert_TLB(int page_num, int frame_num) { // сдвигаем записи 
         }
     }
 
-    if (i == TLB_caches) // если не совпално вставляем в конец
+    if (i == cached) // если не совпално вставляем в конец
         for (int j =0; j < i; j++)
             TLB[j] = TLB[j + 1];
 
     TLB[i].page_number = page_num;
     TLB[i].frame_number = frame_num;
 
-    if (TLB_caches < TLB_SIZE -1 )
-        TLB_caches++;
+    if (cached < TLB_SIZE -1 )
+        cached++;
 
 }
 
@@ -93,7 +91,7 @@ struct page get_page(int logical_address) {
     return current_page;
 }
 
-void foo(struct page current_page)
+void process_virtual_page(struct page current_page)
 {
     int page_number = current_page.page_number;
     int offset = current_page.offset;
@@ -101,7 +99,8 @@ void foo(struct page current_page)
 
     int frame_number = -1;
 
-    for (int i = 0; i < TLB_caches + 1; i++) { // пробуем получить фрейм из tlb
+    // TLB
+    for (int i = 0; i < cached + 1; i++) {
         if (TLB[i].page_number == page_number) {
             frame_number = TLB[i].frame_number;
             hit++;
@@ -109,8 +108,9 @@ void foo(struct page current_page)
         }
     }
 
+    // page table
     if (frame_number == -1) {
-        for (int i = 0; i < first_available_page_table_index;i++) { // пробуем получить фрейм из таблицы страниц
+        for (int i = 0; i < next_available_index;i++) {
             if (PAGE_TABLE[i].page_number == page_number) {
                 frame_number = PAGE_TABLE[i].frame_number;
                 break;
@@ -118,24 +118,21 @@ void foo(struct page current_page)
         }
     }
 
-    if (frame_number == -1) { // получаем фрейм из backing_store_bin
-        frame_number = read_from_store(page_number);
+    // backing_store_bin
+    if (frame_number == -1) {
+        frame_number = read_store(page_number);
         page_miss++;
     }
 
     insert_TLB(page_number,frame_number); // вставляем в tlb
-    value = physical_mememory[frame_number][offset]; // поулчаем значение по физ адресу
+    value = physical_memory[frame_number][offset]; // поулчаем значение по физ адресу
 
     fprintf(correct2_txt, "Virtual address: %d Physical address: %d Value: %d\n", logical_address, (frame_number << 8) | offset, value);
 
 }
 
-
-
-
 int main(int argc, char *argv[]) {
     if (argc != 3) {
-        fprintf(stderr, "Не удалось открыть файл для чтения/записи.");
         return -1;
     }
 
@@ -143,18 +140,7 @@ int main(int argc, char *argv[]) {
     backing_store_bin = fopen("BACKING_STORE.bin", "rb"); // чтение BACKING_STORE в доичном формате
     correct2_txt = fopen(argv[2], "w"); // Открываем файл для записи
 
-    if (address_txt == NULL) {
-        fprintf(stderr, "address.txt error");
-        return -1;
-    }
-
-    if (backing_store_bin == NULL) {
-        fprintf(stderr, "BACKING_STORE.bin error");
-        return -1;
-    }
-
-    if (correct2_txt == NULL) { // Проверяем, удалось ли открыть файл для записи
-        fprintf(stderr, "output file error");
+    if (address_txt == NULL || backing_store_bin == NULL || correct2_txt == NULL) {
         return -1;
     }
 
@@ -162,7 +148,7 @@ int main(int argc, char *argv[]) {
     int logical_address; // логический адрес ( виртуальный адрес )
     while (fscanf(address_txt, "%d", &logical_address) == 1) {
 
-        foo(get_page(logical_address));
+        process_virtual_page(get_page(logical_address));
         processed_address++;
     }
 
