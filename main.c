@@ -1,8 +1,9 @@
 #include <stdio.h>
+#include <stdbool.h>
 
-#define FRAME_SIZE 256
-#define FRAMES 256
-#define TLB_SIZE 16
+#define FRAME_SIZE 256 // размер фрейма 2^8 байт
+#define COUNT_FRAMES 256 // всего 256 фреймов
+#define TLB_SIZE 16 // 16 записей в TLB
 #define CHUNK 256
 
 FILE *address_txt;
@@ -20,9 +21,9 @@ struct page_frame_number {
     int frame_number;
 };
 
-int physical_mememory [FRAMES][FRAME_SIZE];
+int physical_mememory [COUNT_FRAMES][FRAME_SIZE]; // физическая память
 struct page_frame_number TLB[TLB_SIZE];
-struct page_frame_number PAGE_TABLE[FRAMES];
+struct page_frame_number PAGE_TABLE[COUNT_FRAMES];
 int hit = 0;
 int page_miss = 0;
 const int offset_mask = (1<<8)-1; // 255
@@ -34,7 +35,7 @@ int TLB_caches = 0; // кешированные записи
 
 int read_from_store(int page_number) {
     // проверка, что есть место в таблице страниц
-    if (first_available_frame >= FRAMES || first_available_page_table_index >= FRAMES) {
+    if (first_available_frame >= COUNT_FRAMES || first_available_page_table_index >= COUNT_FRAMES) {
         fprintf(stderr, "Memory error\n");
         return -1;
     }
@@ -98,35 +99,34 @@ void foo(struct page current_page)
     int offset = current_page.offset;
     int logical_address = current_page.logical_address;
 
-    int frameNum = -1;
-
+    int frame_number = -1;
 
     for (int i = 0; i < TLB_caches + 1; i++) { // пробуем получить фрейм из tlb
         if (TLB[i].page_number == page_number) {
-            frameNum = TLB[i].frame_number;
+            frame_number = TLB[i].frame_number;
             hit++;
             break;
         }
     }
 
-    if (frameNum == -1) {
+    if (frame_number == -1) {
         for (int i = 0; i < first_available_page_table_index;i++) { // пробуем получить фрейм из таблицы страниц
             if (PAGE_TABLE[i].page_number == page_number) {
-                frameNum = PAGE_TABLE[i].frame_number;
+                frame_number = PAGE_TABLE[i].frame_number;
                 break;
             }
         }
     }
 
-    if (frameNum == -1) { // получаем фрейм из backing_store_bin
-        frameNum = read_from_store(page_number);
+    if (frame_number == -1) { // получаем фрейм из backing_store_bin
+        frame_number = read_from_store(page_number);
         page_miss++;
     }
 
-    insert_TLB(page_number,frameNum); // вставляем в tlb
-    value = physical_mememory[frameNum][offset]; // поулчаем значение по физ адресу
+    insert_TLB(page_number,frame_number); // вставляем в tlb
+    value = physical_mememory[frame_number][offset]; // поулчаем значение по физ адресу
 
-    fprintf(correct2_txt, "Virtual address: %d Physical address: %d Value: %d\n", logical_address, (frameNum << 8) | offset, value);
+    fprintf(correct2_txt, "Virtual address: %d Physical address: %d Value: %d\n", logical_address, (frame_number << 8) | offset, value);
 
 }
 
